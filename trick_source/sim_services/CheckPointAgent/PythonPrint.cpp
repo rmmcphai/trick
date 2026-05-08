@@ -35,7 +35,7 @@ void Trick::PythonPrint::write_decl(std::ostream& chkpnt_os, ALLOC_INFO *info) {
 void Trick::PythonPrint::assign_rvalue(std::ostream& chkpnt_os, void* address, ATTRIBUTES* attr, int curr_dim, int offset) {
 
     chkpnt_os << left_side_name() << " = ";
-    write_rvalue( chkpnt_os, (void*)address, attr, curr_dim, offset);
+    write_rvalue(chkpnt_os, (void*)address, attr, curr_dim, offset, true, false, nullptr);
     chkpnt_os << ";" << std::endl;
 
     return ;
@@ -94,9 +94,12 @@ void Trick::PythonPrint::write_singleton( std::ostream& chkpnt_os, void* address
                 chkpnt_os << ch ;
             }
         break;
-        case TRICK_WCHAR:
+        case TRICK_WCHAR: {
             src_addr = (char*)address + offset * sizeof(wchar_t);
-            chkpnt_os << std::dec << *(wchar_t*)src_addr;
+            char buff[16] = {0};
+            wctomb(buff,*(wchar_t*)src_addr);
+            chkpnt_os << std::dec << buff;
+            }
             break;
         case TRICK_SHORT:
             src_addr = (char*)address + offset * sizeof(short);
@@ -118,6 +121,14 @@ void Trick::PythonPrint::write_singleton( std::ostream& chkpnt_os, void* address
                 } else if ((size_t)attr->size == sizeof(short)) {
                     src_addr = (char*)address + offset * sizeof(short);
                     value =  *(short*)src_addr;
+                } else if ((size_t)attr->size == sizeof(char)) {
+                    src_addr = (char*)address + offset * sizeof(char);
+                    ENUM_ATTR* eattr = (ENUM_ATTR*)attr->attr;
+                    if (eattr != nullptr && (eattr[0].mods & 0x40000000)) {
+                        value = (int)(unsigned char)*(char*)src_addr;
+                    } else {
+                        value = (int)*(char*)src_addr;
+                    }
                 } else {
                     std::cerr << __FUNCTION__ << " enumeration size error." << std::endl;
                     std::cerr.flush();
@@ -164,7 +175,7 @@ void Trick::PythonPrint::write_singleton( std::ostream& chkpnt_os, void* address
             break;
         case TRICK_DOUBLE:
             src_addr = (char*)address + offset * sizeof(double);
-            if (fpclassify( *(float*)src_addr) != FP_NAN) {
+            if (fpclassify(*(double*)src_addr) != FP_NAN) {
                 chkpnt_os << std::setprecision(16) << *(double*)src_addr;
             } else {
                 chkpnt_os << "nan";
@@ -278,8 +289,9 @@ std::string Trick::PythonPrint::
 }
 
 // MEMBER FUNCTION
-void Trick::PythonPrint::write_rvalue( std::ostream& chkpnt_os, void* address,
- ATTRIBUTES* attr, int curr_dim, int offset, bool write_units , bool in_list ) {
+void Trick::PythonPrint::write_rvalue(std::ostream& chkpnt_os, void* address,
+    ATTRIBUTES* attr, int curr_dim, int offset, bool write_units, bool in_list, int* startingIndex)
+{
 
     // If the variable that we are pointing to is Un-arrayed
     if (curr_dim == attr->num_index) {
@@ -342,13 +354,23 @@ void Trick::PythonPrint::write_rvalue( std::ostream& chkpnt_os, void* address,
                     array_len = attr->index[curr_dim].size ;
                     chkpnt_os << "[";
 
+                    bool isFirstElemWritten = false;
                     for (ii = 0; ii < array_len ; ii++ ) {
-
-                        if (ii > 0) {
+                        if (startingIndex != nullptr && *startingIndex > 0)
+                        {
+                            --(*startingIndex);
+                            continue;
+                        }
+                        if (isFirstElemWritten)
+                        {
                             chkpnt_os << ", ";
                         }
-                        write_rvalue( chkpnt_os, address, attr, curr_dim + 1,
-                         offset * attr->index[curr_dim].size + ii, write_units, true);
+                        else
+                        {
+                            isFirstElemWritten = true;
+                        }
+                        write_rvalue(chkpnt_os, address, attr, curr_dim + 1,
+                            offset * attr->index[curr_dim].size + ii, write_units, true, startingIndex);
                     }
                     chkpnt_os << "]";
 
@@ -360,12 +382,37 @@ void Trick::PythonPrint::write_rvalue( std::ostream& chkpnt_os, void* address,
 
                 chkpnt_os << "[";
 
+                int elem_multiplier = 1;
+                for (int jj = curr_dim + 1; jj < attr->num_index; ++jj)
+                {
+                    elem_multiplier *= attr->index[jj].size;
+                }
+
+                bool isFirstElemWritten = false;
                 for (ii=0 ; ii< attr->index[curr_dim].size ; ii++) {
-                    if (ii > 0) {
-                        chkpnt_os << ",";
+                    bool skipIndex = false;
+                    if (startingIndex != nullptr)
+                    {
+                        int nextIterStartingIndex = *startingIndex - elem_multiplier;
+                        if (nextIterStartingIndex >= 0)
+                        {
+                            skipIndex = true;
+                            *startingIndex = nextIterStartingIndex;
+                        }
                     }
-                    write_rvalue( chkpnt_os, address, attr, curr_dim + 1,
-                     offset * attr->index[curr_dim].size + ii, write_units, true);
+                    if (!skipIndex)
+                    {
+                        if (isFirstElemWritten)
+                        {
+                            chkpnt_os << ",";
+                        }
+                        else
+                        {
+                            isFirstElemWritten = true;
+                        }
+                        write_rvalue(chkpnt_os, address, attr, curr_dim + 1,
+                            offset * attr->index[curr_dim].size + ii, write_units, true, startingIndex);
+                    }
                 }
 
                 chkpnt_os << "]";

@@ -191,7 +191,9 @@ int main(int argc, char * argv[]) {
     clang::CompilerInvocation::setLangDefaults(ci.getLangOpts() , clang::IK_CXX) ;
 #endif
 
-#if (LIBCLANG_MAJOR >= 20)
+#if (LIBCLANG_MAJOR >= 22)
+    ci.createDiagnostics();
+#elif (LIBCLANG_MAJOR >= 20)
     // Create a virtual file system
     // This is required for llvm 20+ to create diagnostics properly
     // llvm::IntrusiveRefCntPtr is LLVM's reference counting smart pointer
@@ -211,8 +213,11 @@ int main(int argc, char * argv[]) {
 
     // Create all of the necessary managers.
     ci.createFileManager();
+#if (LIBCLANG_MAJOR >= 22)
+    ci.createSourceManager();
+#else
     ci.createSourceManager(ci.getFileManager());
-
+#endif
     // Tell the preprocessor to use its default predefines
     clang::PreprocessorOptions & ppo = ci.getPreprocessorOpts() ;
     ppo.UsePredefines = true;
@@ -226,7 +231,11 @@ int main(int argc, char * argv[]) {
         to.Triple = llvm::sys::getDefaultTargetTriple();
     }
     std::shared_ptr<clang::TargetOptions> shared_to  = std::make_shared<clang::TargetOptions>(to) ;
+#if (LIBCLANG_MAJOR >= 21)
+    clang::TargetInfo *pti = clang::TargetInfo::CreateTargetInfo(ci.getDiagnostics(), *shared_to);
+#else
     clang::TargetInfo *pti = clang::TargetInfo::CreateTargetInfo(ci.getDiagnostics(), shared_to);
+#endif
     ci.setTarget(pti);
     ci.createPreprocessor(clang::TU_Complete);
 #else
